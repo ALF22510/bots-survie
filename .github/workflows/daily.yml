@@ -1,27 +1,35 @@
-name: bots-quotidien
-
+name: bots
 on:
   schedule:
-    - cron: '10 0 * * *'
-  workflow_dispatch:
-
+    - cron: "*/5 * * * *"   # toutes les 5 minutes (le minimum autorisé par GitHub)
+  workflow_dispatch:         # bouton « Run workflow » pour lancer à la main
 permissions:
   contents: write
-
+concurrency:
+  group: bots
+  cancel-in-progress: false
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - run: pip install requests
-      - run: python bot.py
-      - name: Sauvegarde des résultats
+      - name: Récupérer l'état (branche data)
         run: |
+          git fetch origin +data:refs/remotes/origin/data || true
+          git show origin/data:state.json > state.json 2>/dev/null || rm -f state.json
+      - run: python bot.py
+      - name: Publier l'état (un seul commit, l'historique ne grossit pas)
+        run: |
+          rm -rf /tmp/pub && mkdir /tmp/pub && cp state.json /tmp/pub/
+          cd /tmp/pub
+          git init -q -b data
           git config user.name "bots-survie"
           git config user.email "bots-survie@users.noreply.github.com"
           git add state.json
-          git diff --cached --quiet || (git commit -m "maj quotidienne" && git push)
-          
+          git commit -qm "etat"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
