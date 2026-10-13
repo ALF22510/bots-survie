@@ -1,8 +1,19 @@
 {
   "assets": {
-    "BTC": {"source": "binance", "symbol": "BTCUSDT", "fallback": "BTC-USD"},
-    "ETH": {"source": "binance", "symbol": "ETHUSDT", "fallback": "ETH-USD"},
-    "OR": {"source": "yahoo", "symbol": "GC=F"}
+    "BTC": {
+      "source": "binance",
+      "symbol": "BTCUSDT",
+      "fallback": "BTC-USD"
+    },
+    "ETH": {
+      "source": "binance",
+      "symbol": "ETHUSDT",
+      "fallback": "ETH-USD"
+    },
+    "OR": {
+      "source": "yahoo",
+      "symbol": "GC=F"
+    }
   },
   "interval": "1m",
   "period_days": 7,
@@ -14,8 +25,8 @@
   "fee": 0.001,
   "top_k": 4,
   "mutation": 0.2,
-  "max_risk": 1.0,
-  "backfill_days": 0,
+  "max_risk": 1,
+  "backfill_days": 100,
   "history_step_min": 15,
   "reset_id": 1
 }
