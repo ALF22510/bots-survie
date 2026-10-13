@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bots de survie</title>
+<style>
+:root{--bg:#f6f6f4;--fg:#1a1a1a;--card:#fff;--mut:#666;--a:#c0392b;--g:#1e8449;--b:#2471a3;--o:#b9770e;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+@media (prefers-color-scheme:dark){:root{--bg:#15161a;--fg:#eee;--card:#202228;--mut:#9a9aa5;--a:#ff6b5b;--g:#4cd08a;--b:#5dade2;--o:#f5b041}}
+*{box-sizing:border-box}body{margin:0 auto;max-width:720px;padding:14px;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:0 0 8px}.s{color:var(--mut);font-size:12px}
+.c{background:var(--card);border-radius:12px;padding:12px;margin:12px 0}
+.st{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.st div{text-align:center}.st b{display:block;font-size:18px}.st span{font-size:11px;color:var(--mut)}
+canvas{width:100%;height:210px;display:block}.lg{font-size:12px;color:var(--mut);margin-top:6px}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:5px 6px;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}th{color:var(--mut);font-weight:500}
+label{display:block;margin:8px 0 2px;font-size:13px}input,select,textarea,button{font:inherit;width:100%;padding:8px;border-radius:8px;border:1px solid var(--mut);background:var(--bg);color:var(--fg)}
+button{background:var(--a);color:#fff;border-color:var(--a);margin-top:10px}textarea{height:200px;font:12px monospace}
+</style></head><body>
+<h1>🧬 Bots de survie</h1>
+<div class="s" id="sub">Chargement…</div>
+<div class="c st" id="st"></div>
+<div class="c"><h2>Capital : marché contre bots</h2><canvas id="cv" width="680" height="420"></canvas><div class="lg" id="lg"></div></div>
+<div class="c tw"><h2>Top 10 des bots</h2><table><thead><tr><th>#</th><th>Actif</th><th>Type</th><th>Capital</th><th>Âge</th><th>Gén.</th><th>Pos.</th></tr></thead><tbody id="tb"></tbody></table></div>
+<div class="c tw"><h2>Derniers morts</h2><table><thead><tr><th>Date</th><th>Actif</th><th>Capital</th><th>Âge</th><th>Cause</th></tr></thead><tbody id="lo"></tbody></table></div>
+<div class="c"><h2>⚙️ Réglages</h2>
+<div class="s">Modifie les valeurs, copie le texte généré, puis colle-le dans <b>config.json</b> sur GitHub (icône crayon → Commit). Pris en compte au prochain lancement.</div>
+<label>Règle de mort</label><select id="death_rule"><option value="drawdown">Perte maximale depuis le pic</option><option value="two_negative_weeks">2 semaines négatives d'affilée</option><option value="any_negative_week">Toute semaine négative</option></select>
+<label>Perte max. depuis le pic (0.2 = 20 %)</label><input id="max_drawdown" type="number" step="0.01">
+<label>Nombre de bots</label><input id="population" type="number">
+<label>Objectif hebdo (0.05 = 5 %)</label><input id="weekly_target" type="number" step="0.01">
+<label>Frais par transaction (0.001 = 0,1 %)</label><input id="fee" type="number" step="0.0005">
+<label>Parents possibles (meilleurs bots)</label><input id="top_k" type="number">
+<label>Mutation (0.2 = normale)</label><input id="mutation" type="number" step="0.05">
+<label>Risque max. d'un bot (1 = capital entier)</label><input id="max_risk" type="number" step="0.1">
+<label>Jours simulés dans le passé au 1er lancement (0 = temps réel pur)</label><input id="backfill_days" type="number">
+<button id="gen">Générer config.json</button><textarea id="out" readonly></textarea><button id="cp">Copier</button></div>
+<script>
+const $=i=>document.getElementById(i);let cfg={};
+const col=['#5dade2','#b9770e','#8e44ad','#16a085'];
+function line(c,d,color,W,H,mn,rg,L){c.strokeStyle=color;c.lineWidth=3;c.beginPath();d.slice(-L).forEach((v,i)=>{const x=i/(L-1||1)*W,y=H-8-(v-mn)/rg*(H-16);i?c.lineTo(x,y):c.moveTo(x,y)});c.stroke()}
+async function init(){
+ try{cfg=await (await fetch('config.json?'+Date.now())).json()}catch(e){}
+ for(const k in cfg){const e=$(k);if(e&&typeof cfg[k]!=='object')e.value=cfg[k]}
+ let s;try{s=await (await fetch('state.json?'+Date.now())).json()}catch(e){$('sub').textContent="Pas encore de données : lance le workflow « bots-quotidien » sur GitHub (onglet Actions).";return}
+ const bots=[...s.bots].sort((a,b)=>b.E-a.E),h=s.history,last=h[h.length-1];
+ $('sub').textContent=`Données réelles jusqu'au ${s.last_date} · mis à jour ${s.updated.replace('T',' ').slice(0,16)} UTC`+(s.live_from>s.anchor?` · ⚠️ du ${s.anchor} au ${s.live_from} = simulation sur le passé`:'');
+ const hit=s.wk_total?Math.round(100*s.wk_hits/s.wk_total):0;
+ $('st').innerHTML=[[s.weeks,'semaines'],[s.bots.length,'bots vivants'],[s.deaths,'morts'],[bots[0].E.toFixed(0),'meilleur capital'],[hit+'%','semaines ≥ objectif'],[Math.max(...bots.map(b=>b.age)),'âge max (sem.)']].map(x=>`<div><b>${x[0]}</b><span>${x[1]}</span></div>`).join('');
+ const names=Object.keys(last.mkt),L=Math.min(h.length,400),cv=$('cv'),c=cv.getContext('2d'),W=cv.width,H=cv.height;
+ const sr=[{n:'meilleur bot',v:h.map(x=>x.best),c:'#1e8449'},{n:'bot médian',v:h.map(x=>x.med),c:'#c0392b'},...names.map((n,i)=>({n:n+' (marché)',v:h.map(x=>x.mkt[n]),c:col[i%4]}))];
+ const all=sr.flatMap(x=>x.v.slice(-L)),mn=Math.min(...all),mx=Math.max(...all),rg=(mx-mn)||1;
+ sr.forEach(x=>line(c,x.v,x.c,W,H,mn,rg,L));
+ $('lg').innerHTML=sr.map(x=>`<span style="color:${x.c}">■</span> ${x.n}`).join(' &nbsp; ');
+ $('tb').innerHTML=bots.slice(0,10).map((b,i)=>`<tr><td>${i+1}</td><td>${b.asset}</td><td>${b.kind=='mom'?'tendance':'rebond'}</td><td>${b.E.toFixed(1)}</td><td>${b.age}</td><td>${b.gen}</td><td>${b.pos?'🟢':'⚪'}</td></tr>`).join('');
+ $('lo').innerHTML=s.log.slice(-15).reverse().map(l=>`<tr><td>${l.d}</td><td>${l.asset}</td><td>${l.E}</td><td>${l.age}</td><td>${l.why}</td></tr>`).join('')||'<tr><td colspan="5">Aucun mort pour l\'instant</td></tr>';
+}
+$('gen').onclick=()=>{const o={...cfg};['max_drawdown','population','weekly_target','fee','top_k','mutation','max_risk','backfill_days'].forEach(k=>o[k]=+$(k).value);o.death_rule=$('death_rule').value;$('out').value=JSON.stringify(o,null,2)};
+$('cp').onclick=async()=>{$('out').select();try{await navigator.clipboard.writeText($('out').value)}catch(e){document.execCommand('copy')}$('cp').textContent='Copié ✓'};
+init();
+</script></body></html>
