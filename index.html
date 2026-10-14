@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0e11"><title>Bots de survie</title>
+<style>
+:root{--bg:#0b0e11;--cd:#161a1e;--ln:#2b3139;--tx:#eaecef;--mu:#848e9c;--up:#0ecb81;--dn:#f6465d;--ac:#f0b90b;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+*{box-sizing:border-box}body{margin:0 auto;max-width:780px;background:var(--bg);color:var(--tx);font:14px system-ui,sans-serif;padding:12px}
+.up{color:var(--up)}.dn{color:var(--dn)}.mu{color:var(--mu)}.sm{font-size:12px}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}h1{font-size:17px;margin:0}header .sm{text-align:right}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.c{background:var(--cd);border-radius:12px;padding:12px;margin-bottom:10px}.big{font-size:28px;font-weight:700}
+.g{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:10px;text-align:center}.g b{display:block;font-size:15px}.g span{font-size:10px;color:var(--mu)}
+.wl{display:flex;align-items:center;gap:8px;padding:9px 6px;cursor:pointer;border-radius:8px}.wl+.wl{border-top:1px solid var(--ln)}.wl.on{background:#1e2329}.wl .n{flex:1;font-weight:600}.wl .p{text-align:right;min-width:92px}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
+button,select,input,textarea{font:inherit;color:var(--tx);background:var(--ln);border:0;border-radius:8px;padding:6px 11px}button.on{background:var(--ac);color:#000}
+canvas{width:100%;height:260px;display:block;touch-action:pan-y}
+table{width:100%;border-collapse:collapse;font-size:12.5px}td,th{padding:6px 4px;text-align:right;white-space:nowrap}th{color:var(--mu);font-weight:500}td:first-child,th:first-child{text-align:left}tr+tr td{border-top:1px solid var(--ln)}
+.tw{overflow-x:auto}label{display:block;margin:8px 0 2px;font-size:12px;color:var(--mu)}input,select,textarea{width:100%}textarea{height:170px;font:12px monospace}
+</style></head><body>
+<header><h1>🧬 Bots de survie</h1><div class="sm mu" id="st">Chargement…</div></header>
+<div class="c"><div class="sm mu">Capital médian des bots</div><div><span class="big" id="med">–</span> <span id="mp"></span></div><div class="sm mu" id="ex"></div><div class="g" id="gs"></div></div>
+<div class="c" id="wl"></div>
+<div class="c"><div class="row" style="justify-content:space-between"><b id="ct"></b><span id="cp"></span></div><div class="row" id="bt"></div>
+<div style="position:relative"><canvas id="cv"></canvas><div id="em" class="mu" style="display:none;padding:50px 10px;text-align:center">⏳ Pas encore assez de points pour tracer la courbe (un point toutes les 15 min pour « Bots vs marché »).</div>
+<div id="vl" style="position:absolute;top:8px;height:232px;width:1px;background:var(--mu);display:none;pointer-events:none"></div>
+<div id="tip" style="position:absolute;top:8px;display:none;background:#1e2329;border:1px solid var(--ln);border-radius:8px;padding:6px 8px;font-size:12px;pointer-events:none;white-space:nowrap"></div></div>
+<div class="sm mu" id="lg" style="margin-top:6px"></div></div>
+<div class="row" id="tabs"></div><div class="c tw" id="tb"></div>
+<script>
+const $=i=>document.getElementById(i),ST={'1m':1,'5m':5,'15m':15,'1h':60,'1d':1440},MC=['#5dade2','#a569bd','#eb984e'];
+let S,cfg={},sel,tf=6,mode='p',tab='r',CH;
+const up=v=>v>=0?'up':'dn',fp=v=>(v>=0?'+':'')+v.toFixed(2).replace('.',',')+'%',
+fn=v=>v.toLocaleString('fr-FR',{maximumFractionDigits:v>=1000?1:2}),
+med=a=>{a=[...a].sort((x,y)=>x-y);return a[a.length>>1]},
+last=n=>{const p=S.prices[n],k=Object.keys(p).sort();return p[k[k.length-1]]},
+tp=b=>b.kind=='mom'?'tendance':'rebond',
+tbl=(h,r)=>`<table><thead><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${r.map(x=>`<tr>${x.map(y=>`<td>${y}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+function ser(n){const p=S.prices[n],k=Object.keys(p).sort(),m=tf?Math.max(2,Math.round(tf*60/ST[S.interval])):k.length,ks=k.slice(-m);return{t:ks,v:ks.map(x=>p[x])}}
+function spark(v,col){const s=Math.ceil(v.length/60),a=v.filter((_,i)=>i%s==0||i==v.length-1),mn=Math.min(...a),r=(Math.max(...a)-mn)||1,n=a.length-1||1;return `<svg width="70" height="26" viewBox="0 0 70 26"><polyline fill="none" stroke="${col}" stroke-width="1.6" points="${a.map((y,i)=>(i/n*70).toFixed(1)+','+(24-(y-mn)/r*22).toFixed(1)).join(' ')}"/></svg>`}
+function pick(n){sel=n;mode='p';render(true)}
+const F=[['death_rule','Règle de mort',[['drawdown','Perte max depuis le pic'],['two_negative_weeks','2 périodes négatives'],['any_negative_week','Toute période négative']]],['interval','Taille des bougies',[['1m','1 minute'],['5m','5 minutes'],['15m','15 minutes'],['1h','1 heure'],['1d','1 jour']]],['period_days','Durée d\'une période (jours)'],['max_drawdown','Perte max depuis le pic (0.2 = 20 %)'],['population','Nombre de bots'],['weekly_target','Objectif par période (0.05 = 5 %)'],['fee','Frais par transaction (0.001 = 0,1 %)'],['top_k','Parents possibles'],['mutation','Mutation (0.2 = normale)'],['max_risk','Risque max d\'un bot (1 = tout)'],['backfill_days','Jours simulés dans le passé au 1er lancement (0 = temps réel)']];
+function gen(){const o={...cfg};F.forEach(([k,,s])=>o[k]=s?$(k).value:+$(k).value);if($('reset').checked)o.reset_id=(cfg.reset_id||0)+1;$('out').value=JSON.stringify(o,null,2)}
+async function cp(){$('out').select();try{await navigator.clipboard.writeText($('out').value)}catch(e){document.execCommand('copy')}$('cpb').textContent='Copié ✓'}
+function body(){const c0=cfg.start_capital||100;
+ if(tab=='r')return tbl(['#','Bot','Capital','P/L','Âge','Gén.',''],[...S.bots].sort((a,b)=>b.E-a.E).map((b,i)=>[i+1,`#${b.id} ${b.asset} ${tp(b)}`,b.E.toFixed(1),`<span class="${up(b.E-c0)}">${fp((b.E/c0-1)*100)}</span>`,b.age,b.gen,b.pos?'🟢':'⚪']));
+ if(tab=='o'){const o=S.bots.filter(b=>b.pos).map(b=>{const L=last(b.asset),m=(L/b.entry-1)*100*b.risk;return[`#${b.id} ${b.asset} ${tp(b)}`,fn(b.entry),fn(L),Math.round(b.risk*100)+'%',`<span class="${up(m)}">${fp(m)}</span>`]});return o.length?tbl(['Bot','Entrée','Prix','Risque','P/L'],o):'<div class="mu">Aucune position ouverte pour l\'instant.</div>'}
+ if(tab=='m'){const o=[...S.log].reverse().slice(0,40).map(l=>[l.d.slice(5,16).replace('T',' '),`#${l.id} ${l.asset} ${tp(l)}`,l.E,l.age,l.why]);return o.length?tbl(['Date (UTC)','Bot','Capital','Âge','Cause'],o):'<div class="mu">Aucun mort pour l\'instant.</div>'}
+ return '<div class="sm mu">Modifie, génère, copie, puis colle dans config.json sur GitHub (crayon → Commit).</div>'+F.map(([k,l,o])=>`<label>${l}</label>`+(o?`<select id="${k}">${o.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select>`:`<input id="${k}" type="number" step="any">`)).join('')+'<label><input id="reset" type="checkbox" style="width:auto"> Réinitialiser l\'expérience</label><div class="row" style="margin-top:10px"><button class="on" onclick="gen()">Générer config.json</button><button id="cpb" onclick="cp()">Copier</button></div><textarea id="out" readonly></textarea>'}
+function draw(sr,pct){
+ const cv=$('cv'),n=sr[0]?sr[0].v.length:0;CH=null;hovOff();
+ if(n<2){cv.style.display='none';$('em').style.display='block';return}
+ cv.style.display='block';$('em').style.display='none';
+ const d=devicePixelRatio||1,W=cv.clientWidth,H=260;cv.width=W*d;cv.height=H*d;const c=cv.getContext('2d');c.scale(d,d);
+ const pl=4,pr=54,pt=8,pb=20,w=W-pl-pr,h=H-pt-pb,al=sr.flatMap(x=>x.v);
+ let mn=Math.min(...al),mx=Math.max(...al);if(pct){mn=Math.min(mn,0);mx=Math.max(mx,0)}
+ const pd=(mx-mn)*.1||1;mn-=pd;mx+=pd;const X=i=>pl+i/(n-1)*w,Y=v=>pt+(mx-v)/(mx-mn)*h;
+ c.font='11px system-ui';c.fillStyle='#848e9c';c.textAlign='left';c.textBaseline='middle';
+ for(let k=0;k<=4;k++){const v=mn+(mx-mn)*k/4,y=Y(v);c.strokeStyle='#2b3139';c.lineWidth=1;c.beginPath();c.moveTo(pl,y);c.lineTo(pl+w,y);c.stroke();c.fillText(pct?(v>=0?'+':'')+v.toFixed(mx-mn<4?1:0)+'%':fn(v),pl+w+5,y)}
+ if(pct){c.setLineDash([4,4]);c.strokeStyle='#848e9c';c.beginPath();c.moveTo(pl,Y(0));c.lineTo(pl+w,Y(0));c.stroke();c.setLineDash([])}
+ const t=sr[0].t;c.textBaseline='top';[[0,'left'],[(n-1)>>1,'center'],[n-1,'right']].forEach(([i,a])=>{c.textAlign=a;c.fillText(t[i].slice(5,16).replace('T',' '),X(i),H-pb+6)});
+ sr.forEach((x,j)=>{c.strokeStyle=x.c;c.lineWidth=!pct||j<2?2.4:1.8;c.lineJoin='round';c.beginPath();x.v.forEach((v,i)=>i?c.lineTo(X(i),Y(v)):c.moveTo(X(i),Y(v)));c.stroke();
+  if(!pct){c.lineTo(X(n-1),pt+h);c.lineTo(X(0),pt+h);const g=c.createLinearGradient(0,pt,0,pt+h);g.addColorStop(0,x.c+'55');g.addColorStop(1,x.c+'00');c.fillStyle=g;c.fill()}
+  c.fillStyle=x.c;c.beginPath();c.arc(X(n-1),Y(x.v[n-1]),3.5,0,7);c.fill()});
+ CH={sr,n,t,pl,w,W,pct};
+}
+function hov(e){if(!CH)return;const r=$('cv').getBoundingClientRect(),i=Math.max(0,Math.min(CH.n-1,Math.round((e.clientX-r.left-CH.pl)/CH.w*(CH.n-1)))),x=CH.pl+i/(CH.n-1)*CH.w,T=$('tip'),V=$('vl');
+ V.style.display=T.style.display='block';V.style.left=x+'px';
+ T.innerHTML=`<b>${CH.t[i].replace('T',' ')} UTC</b>`+CH.sr.map(s=>`<br><span style="color:${s.c}">■</span> ${s.n} <b>${CH.pct?fp(s.v[i]):fn(s.v[i])}</b>`).join('');
+ T.style.left=Math.max(0,Math.min(CH.W-T.offsetWidth,x-T.offsetWidth/2))+'px'}
+function hovOff(){$('vl').style.display=$('tip').style.display='none'}
+function render(keep){
+ const age=(Date.now()-new Date(S.updated))/6e4,ok=age<=15,c0=cfg.start_capital||100,names=Object.keys(S.prices);if(!sel)sel=names[0];
+ $('st').innerHTML=`<span class="dot" style="background:${ok?'var(--up)':'var(--dn)'}"></span>${ok?'En direct':'Retard '+Math.round(age)+' min'}<br>données ${S.last_ts.slice(5,16).replace('T',' ')} UTC · bougies ${S.interval}`+(S.live_from>S.anchor?'<br>⚠️ début simulé sur le passé':'');
+ const es=S.bots.map(b=>b.E),m=med(es),k=names.filter(n=>(m/c0-1)*100>(last(n)/S.base[n]-1)*100).length,hit=S.wk_total?Math.round(100*S.wk_hits/S.wk_total):0;
+ $('med').textContent=m.toFixed(2).replace('.',',');$('mp').innerHTML=`<span class="${up(m-c0)}">${fp((m/c0-1)*100)}</span>`;
+ $('ex').textContent=`Meilleur bot ${Math.max(...es).toFixed(2).replace('.',',')} · départ ${c0} · le bot médian bat ${k} marché${k>1?'s':''} sur ${names.length} (acheter et garder)`;
+ $('gs').innerHTML=[[S.bots.length,'vivants'],[S.deaths,'morts'],[S.weeks,'périodes'],[hit+'%','≥ objectif'],[Math.max(...S.bots.map(b=>b.age)),'âge max']].map(x=>`<div><b>${x[0]}</b><span>${x[1]}</span></div>`).join('');
+ $('wl').innerHTML=`<div class="sm mu" style="margin-bottom:4px">Marchés · variation sur ${tf?tf+' h':'tout l\'historique'}</div>`+names.map(n=>{const v=ser(n).v,ch=(v[v.length-1]/v[0]-1)*100;return `<div class="wl ${n==sel&&mode=='p'?'on':''}" onclick="pick('${n}')"><span class="n">${n}</span>${spark(v,ch>=0?'#0ecb81':'#f6465d')}<span class="p">${fn(v[v.length-1])}<br><span class="sm ${up(ch)}">${fp(ch)}</span></span></div>`}).join('');
+ $('bt').innerHTML=[['p','Prix'],['b','Bots vs marché']].map(([a,l])=>`<button class="${mode==a?'on':''}" onclick="mode='${a}';render(true)">${l}</button>`).join('')+'<span style="flex:1"></span>'+[[1,'1 h'],[6,'6 h'],[24,'24 h'],[0,'Tout']].map(([a,l])=>`<button class="${tf==a?'on':''}" onclick="tf=${a};render(true)">${l}</button>`).join('');
+ let sr,pct=false;
+ if(mode=='p'){const s=ser(sel),v=s.v,ch=(v[v.length-1]/v[0]-1)*100;sr=[{n:sel,c:ch>=0?'#0ecb81':'#f6465d',t:s.t,v}];$('ct').textContent=sel;$('cp').innerHTML=`<span style="font-size:22px;font-weight:700">${fn(v[v.length-1])}</span> <span class="${up(ch)}">${fp(ch)}</span>`;$('lg').textContent=''}
+ else{pct=true;const h=S.history,lim=new Date(h[h.length-1].d)-tf*36e5,hh=tf?h.filter(x=>new Date(x.d)>=lim):h,t=hh.map(x=>x.d);
+  sr=[{n:'meilleur bot',c:'#0ecb81',t,v:hh.map(x=>(x.best/c0-1)*100)},{n:'bot médian',c:'#f0b90b',t,v:hh.map(x=>(x.med/c0-1)*100)},...Object.keys(S.base).map((n,i)=>({n:n+' (marché)',c:MC[i%3],t,v:hh.map(x=>x.mkt[n]-100)}))];
+  $('ct').textContent='Bots contre marché (% depuis le départ)';$('cp').textContent='';
+  $('lg').innerHTML=sr.map(x=>{const v=x.v[x.v.length-1];return `<span style="color:${x.c}">■</span> ${x.n} <b class="${up(v)}">${fp(v)}</b>`}).join(' &nbsp; ')}
+ draw(sr,pct);
+ $('tabs').innerHTML=[['r','Classement'],['o','Positions'],['m','Morts'],['s','Réglages']].map(([a,l])=>`<button class="${tab==a?'on':''}" onclick="tab='${a}';render()">${l}</button>`).join('');
+ if(!(keep&&tab=='s')){$('tb').innerHTML=body();if(tab=='s')F.forEach(([k])=>{if(cfg[k]!==undefined)$(k).value=cfg[k]})}
+}
+async function load(first){
+ try{if(first===1)cfg=await (await fetch('config.json?'+Date.now())).json()}catch(e){}
+ try{const o=location.hostname.split('.')[0],r=location.pathname.split('/')[1];S=await (await fetch(`https://raw.githubusercontent.com/${o}/${r}/data/state.json?t=`+Date.now())).json()}catch(e){if(!S){$('st').textContent='Pas encore de données : lance le workflow « bots » (onglet Actions).';return}}
+ render(first!==1)
+}
+const cv=$('cv');cv.addEventListener('pointermove',hov);cv.addEventListener('pointerdown',hov);cv.addEventListener('pointerleave',hovOff);cv.addEventListener('pointerup',()=>setTimeout(hovOff,1500));
+addEventListener('resize',()=>S&&render(true));load(1);setInterval(load,60000);
+</script></body></html>
