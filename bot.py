@@ -87,34 +87,40 @@ def fetch_asset(a, iv):
 
 # ---------- Bots ----------
 def params(cfg):
-    iv = cfg["interval"]
-    sc = (STEP_MIN[iv] / 1440) ** 0.5  # les mouvements d'une bougie courte sont plus petits
-    lo, hi = LB[iv]
-    return sc, cfg.get("lb_min", lo), cfg.get("lb_max", hi), cfg["fee"] * 3
+    lo, hi = LB[cfg["interval"]]
+    return cfg.get("lb_min", lo), cfg.get("lb_max", hi)
+
+
+GENES = ("asset", "kind", "side", "lb", "edge", "slm", "cd", "risk")
 
 
 def random_genes(cfg, names):
-    sc, lo, hi, f = params(cfg)
+    lo, hi = params(cfg)
     return dict(asset=random.choice(names), kind=random.choice(["mom", "rev"]),
-                lb=random.randint(lo, hi), thr=round(random.uniform(0, 0.03 * sc), 5),
-                risk=round(random.uniform(0.1, cfg["max_risk"]), 2),
-                sl=round(random.uniform(max(0.02 * sc, f), 0.12 * sc + f), 5))
+                side=random.choice([1, -1]), lb=random.randint(lo, hi),
+                edge=round(random.uniform(cfg.get("edge_min", 1.5), cfg.get("edge_max", 10)), 2),
+                slm=round(random.uniform(1, 5), 2),
+                cd=random.randint(0, cfg.get("cooldown_max", hi)),
+                risk=round(random.uniform(0.1, cfg["max_risk"]), 2))
 
 
 def mutate(g, cfg, names):
-    sc, lo, hi, f = params(cfg)
+    lo, hi = params(cfg)
+    e0, e1, cm = cfg.get("edge_min", 1.5), cfg.get("edge_max", 10), cfg.get("cooldown_max", hi)
     s = cfg["mutation"] / 0.2  # 0.2 = mutation « normale »
-    g = dict(g)
     st = max(1, round(hi * 0.1 * s))
+    g = dict(g)
     g["lb"] = int(min(hi * 2, max(lo, g["lb"] + random.randint(-st, st))))
-    g["thr"] = round(min(0.05 * sc, max(0, g["thr"] + random.uniform(-.005, .005) * sc * s)), 5)
+    g["edge"] = round(min(e1 * 1.5, max(e0, g["edge"] + random.uniform(-.7, .7) * s)), 2)
+    g["slm"] = round(min(6, max(1, g["slm"] + random.uniform(-.5, .5) * s)), 2)
+    g["cd"] = int(min(cm * 2, max(0, g["cd"] + random.randint(-st, st))))
     g["risk"] = round(min(cfg["max_risk"], max(0.05, g["risk"] + random.uniform(-.1, .1) * s)), 2)
-    g["sl"] = round(min(0.2 * sc + f, max(max(0.01 * sc, f),
-                                         g["sl"] + random.uniform(-.02, .02) * sc * s)), 5)
     if random.random() < cfg["mutation"] * 0.25:
         g["asset"] = random.choice(names)
     if random.random() < cfg["mutation"] * 0.15:
         g["kind"] = "rev" if g["kind"] == "mom" else "mom"
+    if random.random() < cfg["mutation"] * 0.15:
+        g["side"] = -g["side"]
     return g
 
 
@@ -122,7 +128,7 @@ def make_bot(genes, gen, born, state, cfg):
     state["next_id"] += 1
     c = cfg["start_capital"]
     return dict(genes, id=state["next_id"], gen=gen, born=born, E=c, peak=c, ws=c,
-                neg=0, age=0, pos=0, entry=0)
+                neg=0, age=0, pos=0, entry=0, wait=0, tr=0, pr=[])
 
 
 def asset_view(prices):
@@ -140,30 +146,36 @@ def price_asof(view, n, d):
 
 
 def step_candle(state, cfg, view, d):
-    """Une bougie : on applique son rendement aux positions ouvertes, puis chaque
-    bot décide à la clôture (sans regarder le futur)."""
+    """Une bougie : rendement des positions ouvertes (long ou short), puis décision
+    à la clôture. Un bot n'entre que si le mouvement dépasse ses frais (seuil =
+    edge x coût d'un aller-retour), puis attend `cd` bougies après chaque sortie."""
+    fee = cfg["fee"]
+    borrow = cfg.get("short_cost_day", 0.0003) * STEP_MIN[cfg["interval"]] / 1440
     for b in state["bots"]:
         ds, cl, idx = view[b["asset"]]
         i = idx.get(d)
         if i is None:
             continue
+        sd = b["side"]
         if b["pos"] and i > 0:
-            b["E"] *= 1 + b["risk"] * (cl[i] / cl[i - 1] - 1)
+            b["E"] *= 1 + sd * b["risk"] * (cl[i] / cl[i - 1] - 1) - (borrow * b["risk"] if sd < 0 else 0)
         b["peak"] = max(b["peak"], b["E"])
+        if b["wait"] > 0:
+            b["wait"] -= 1
         if i < b["lb"]:
             continue
-        m, t = cl[i] / cl[i - b["lb"]] - 1, b["thr"]
+        m, t = sd * (cl[i] / cl[i - b["lb"]] - 1), b["edge"] * 2 * fee
         if b["pos"]:
-            lost = cl[i] / b["entry"] - 1 < -b["sl"]
+            lost = sd * (cl[i] / b["entry"] - 1) < -t * b["slm"]
             out = m < -t if b["kind"] == "mom" else m > 0
             if lost or out:
-                b["pos"] = 0
-                b["E"] *= 1 - cfg["fee"] * b["risk"]
-        else:
-            go = m > t if b["kind"] == "mom" else m < -max(t, 0.01 * params(cfg)[0])
-            if go:
+                b["pos"], b["wait"] = 0, b["cd"]
+                b["E"] *= 1 - fee * b["risk"]
+        elif b["wait"] <= 0:
+            if (m > t) if b["kind"] == "mom" else (m < -t):
                 b["pos"], b["entry"] = 1, cl[i]
-                b["E"] *= 1 - cfg["fee"] * b["risk"]
+                b["tr"] += 1
+                b["E"] *= 1 - fee * b["risk"]
 
 
 def period_check(state, cfg, d, names):
@@ -175,6 +187,7 @@ def period_check(state, cfg, d, names):
         state["wk_total"] += 1
         state["wk_hits"] += wr >= cfg["weekly_target"]
         b["neg"] = b["neg"] + 1 if wr < 0 else 0
+        b["pr"] = (b.get("pr", []) + [wr])[-4:]
         b["ws"] = b["E"]
         why = None
         if rule == "drawdown" and b["E"] < b["peak"] * (1 - cfg["max_drawdown"]):
@@ -186,15 +199,16 @@ def period_check(state, cfg, d, names):
         if why:
             dead.append((b, why))
     deadids = {b["id"] for b, _ in dead}
-    alive = sorted((b for b in state["bots"] if b["id"] not in deadids), key=lambda b: -b["E"])
+    score = lambda b: sum(b["pr"]) / len(b["pr"]) if b["pr"] else -9  # moyenne des dernières périodes
+    alive = sorted((b for b in state["bots"] if b["id"] not in deadids), key=lambda b: -score(b))
     parents = alive[:cfg["top_k"]]
     for b, why in dead:
         state["deaths"] += 1
-        state["log"].append(dict(d=d, id=b["id"], asset=b["asset"], kind=b["kind"],
+        state["log"].append(dict(d=d, id=b["id"], asset=b["asset"], kind=b["kind"], side=b["side"],
                                  E=round(b["E"], 1), age=b["age"], why=why))
         if parents:
             p = random.choice(parents)
-            nb = make_bot(mutate({k: p[k] for k in ("asset", "kind", "lb", "thr", "risk", "sl")},
+            nb = make_bot(mutate({k: p[k] for k in GENES},
                                  cfg, names), p["gen"] + 1, d, state, cfg)
         else:
             nb = make_bot(random_genes(cfg, names), 1, d, state, cfg)
@@ -219,7 +233,8 @@ def main():
     if iv not in STEP_MIN:
         sys.exit("interval doit être l'un de : " + ", ".join(STEP_MIN))
     # réinitialisation : changer reset_id (ou l'intervalle) dans config.json
-    if state and (state.get("reset_id", 0) != cfg.get("reset_id", 0) or state.get("interval") != iv):
+    if state and (state.get("reset_id", 0) != cfg.get("reset_id", 0) or state.get("interval") != iv
+                  or state.get("ver") != 2):
         print("Réinitialisation de l'expérience.")
         state = None
     prices = state["prices"] if state else {n: {} for n in names}
@@ -241,7 +256,7 @@ def main():
         start = dates[max(0, len(dates) - 1 - n_back)]
         state = dict(prices=prices, last_ts=start, anchor=start, wk=0, weeks=0, deaths=0,
                      wk_hits=0, wk_total=0, next_id=0, history=[], log=[], bots=[],
-                     live_from=dates[-1], interval=iv, reset_id=cfg.get("reset_id", 0),
+                     live_from=dates[-1], interval=iv, ver=2, reset_id=cfg.get("reset_id", 0),
                      base={n: price_asof(view, n, start) for n in names})
         state["bots"] = [make_bot(random_genes(cfg, names), 1, start, state, cfg)
                          for _ in range(cfg["population"])]

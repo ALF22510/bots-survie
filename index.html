@@ -32,7 +32,7 @@ const up=v=>v>=0?'up':'dn',fp=v=>(v>=0?'+':'')+v.toFixed(2).replace('.',',')+'%'
 fn=v=>v.toLocaleString('fr-FR',{maximumFractionDigits:v>=1000?1:2}),
 med=a=>{a=[...a].sort((x,y)=>x-y);return a[a.length>>1]},
 last=n=>{const p=S.prices[n],k=Object.keys(p).sort();return p[k[k.length-1]]},
-tp=b=>b.kind=='mom'?'tendance':'rebond',
+tp=b=>(b.kind=='mom'?'tendance':'rebond')+(b.side<0?' ↓':' ↑'),
 tbl=(h,r)=>`<table><thead><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${r.map(x=>`<tr>${x.map(y=>`<td>${y}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 function ser(n){const p=S.prices[n],k=Object.keys(p).sort(),m=tf?Math.max(2,Math.round(tf*60/ST[S.interval])):k.length,ks=k.slice(-m);return{t:ks,v:ks.map(x=>p[x])}}
 function spark(v,col){const s=Math.ceil(v.length/60),a=v.filter((_,i)=>i%s==0||i==v.length-1),mn=Math.min(...a),r=(Math.max(...a)-mn)||1,n=a.length-1||1;return `<svg width="70" height="26" viewBox="0 0 70 26"><polyline fill="none" stroke="${col}" stroke-width="1.6" points="${a.map((y,i)=>(i/n*70).toFixed(1)+','+(24-(y-mn)/r*22).toFixed(1)).join(' ')}"/></svg>`}
@@ -41,8 +41,9 @@ const F=[['death_rule','Règle de mort',[['drawdown','Perte max depuis le pic'],
 function gen(){const o={...cfg};F.forEach(([k,,s])=>o[k]=s?$(k).value:+$(k).value);if($('reset').checked)o.reset_id=(cfg.reset_id||0)+1;$('out').value=JSON.stringify(o,null,2)}
 async function cp(){$('out').select();try{await navigator.clipboard.writeText($('out').value)}catch(e){document.execCommand('copy')}$('cpb').textContent='Copié ✓'}
 function body(){const c0=cfg.start_capital||100;
- if(tab=='r')return tbl(['#','Bot','Capital','P/L','Âge','Gén.',''],[...S.bots].sort((a,b)=>b.E-a.E).map((b,i)=>[i+1,`#${b.id} ${b.asset} ${tp(b)}`,b.E.toFixed(1),`<span class="${up(b.E-c0)}">${fp((b.E/c0-1)*100)}</span>`,b.age,b.gen,b.pos?'🟢':'⚪']));
- if(tab=='o'){const o=S.bots.filter(b=>b.pos).map(b=>{const L=last(b.asset),m=(L/b.entry-1)*100*b.risk;return[`#${b.id} ${b.asset} ${tp(b)}`,fn(b.entry),fn(L),Math.round(b.risk*100)+'%',`<span class="${up(m)}">${fp(m)}</span>`]});return o.length?tbl(['Bot','Entrée','Prix','Risque','P/L'],o):'<div class="mu">Aucune position ouverte pour l\'instant.</div>'}
+ if(tab=='r'){const fee=cfg.fee||0.001,W=[['Témoin : rester en liquidités',c0],...Object.keys(S.base).map(n=>['Témoin : acheter et garder '+n,c0*last(n)/S.base[n]*(1-fee)])],R=[...S.bots.map(b=>({E:b.E,b,n:`#${b.id} ${b.asset} ${tp(b)}`})),...W.map(w=>({E:w[1],n:`<i class="mu">${w[0]}</i>`}))].sort((x,y)=>y.E-x.E);
+  return tbl(['#','Bot','Capital','P/L','Trans.','Âge','Gén.',''],R.map((r,i)=>[i+1,r.n,r.E.toFixed(1),`<span class="${up(r.E-c0)}">${fp((r.E/c0-1)*100)}</span>`,r.b?(r.b.tr??'–'):'',r.b?r.b.age:'',r.b?r.b.gen:'',r.b?(r.b.pos?'🟢':'⚪'):'']))}
+ if(tab=='o'){const o=S.bots.filter(b=>b.pos).map(b=>{const L=last(b.asset),m=(L/b.entry-1)*100*b.risk*(b.side<0?-1:1);return[`#${b.id} ${b.asset} ${tp(b)}`,fn(b.entry),fn(L),Math.round(b.risk*100)+'%',`<span class="${up(m)}">${fp(m)}</span>`]});return o.length?tbl(['Bot','Entrée','Prix','Risque','P/L'],o):'<div class="mu">Aucune position ouverte pour l\'instant.</div>'}
  if(tab=='m'){const o=[...S.log].reverse().slice(0,40).map(l=>[l.d.slice(5,16).replace('T',' '),`#${l.id} ${l.asset} ${tp(l)}`,l.E,l.age,l.why]);return o.length?tbl(['Date (UTC)','Bot','Capital','Âge','Cause'],o):'<div class="mu">Aucun mort pour l\'instant.</div>'}
  return '<div class="sm mu">Modifie, génère, copie, puis colle dans config.json sur GitHub (crayon → Commit).</div>'+F.map(([k,l,o])=>`<label>${l}</label>`+(o?`<select id="${k}">${o.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select>`:`<input id="${k}" type="number" step="any">`)).join('')+'<label><input id="reset" type="checkbox" style="width:auto"> Réinitialiser l\'expérience</label><div class="row" style="margin-top:10px"><button class="on" onclick="gen()">Générer config.json</button><button id="cpb" onclick="cp()">Copier</button></div><textarea id="out" readonly></textarea>'}
 function draw(sr,pct){
